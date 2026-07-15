@@ -1,0 +1,318 @@
+{
+  "mapping_version": "1.0",
+  "source": "legacy_hrm (MySQL)",
+  "destination": "people_platform (MongoDB)",
+  "generated_at": "2026-07-14T20:47:00Z",
+  "tables": [
+    {
+      "source_table": "emp_master",
+      "destination_collection": "employees",
+      "confidence": 0.97,
+      "reasoning": "Both represent the core employee entity with matching structural role in their respective schemas.",
+      "field_mappings": [
+        {
+          "source_field": "emp_id",
+          "destination_field": "_id",
+          "type_transform": "INT PRIMARY KEY -> ObjectId",
+          "confidence": 0.90,
+          "reasoning": "Primary key identifier maps to MongoDB document _id; ID generation strategy required at migration time.",
+          "notes": "Store original emp_id as a legacy field on the document (e.g., meta.legacyEmpId) for traceability during and after migration."
+        },
+        {
+          "source_field": "emp_cd",
+          "destination_field": "employeeCode",
+          "type_transform": "VARCHAR(20) -> String",
+          "confidence": 0.99,
+          "reasoning": "Both represent a unique human-readable employee code with matching semantics.",
+          "notes": null
+        },
+        {
+          "source_field": "f_name",
+          "destination_field": "fullName.firstName",
+          "type_transform": "VARCHAR(50) -> String (nested path)",
+          "confidence": 0.98,
+          "reasoning": "Flat MySQL first-name field promoted into MongoDB fullName sub-document.",
+          "notes": null
+        },
+        {
+          "source_field": "l_name",
+          "destination_field": "fullName.lastName",
+          "type_transform": "VARCHAR(50) -> String (nested path)",
+          "confidence": 0.98,
+          "reasoning": "Flat MySQL last-name field promoted into MongoDB fullName sub-document.",
+          "notes": null
+        },
+        {
+          "source_field": "dob",
+          "destination_field": null,
+          "type_transform": "N/A",
+          "confidence": 0.0,
+          "reasoning": "No date-of-birth field exists in the destination employees collection; likely intentionally omitted for privacy or scope.",
+          "notes": "Confirm with product owner whether DOB is intentionally dropped or requires an additional destination field before running the migration."
+        },
+        {
+          "source_field": "hire_dt",
+          "destination_field": "employment.startDate",
+          "type_transform": "DATETIME -> ISODate",
+          "confidence": 0.97,
+          "reasoning": "Employment start date semantics match hire date directly.",
+          "notes": "Normalize to UTC ISO 8601 during migration."
+        },
+        {
+          "source_field": "term_dt",
+          "destination_field": "employment.endDate",
+          "type_transform": "DATETIME -> ISODate (nullable)",
+          "confidence": 0.97,
+          "reasoning": "Termination date maps to employment end date; both null when the employee is still active.",
+          "notes": "Preserve null semantics; normalize to UTC ISO 8601 when present."
+        },
+        {
+          "source_field": "dept_id",
+          "destination_field": "department.departmentId",
+          "type_transform": "INT FK -> ObjectId (foreign reference)",
+          "confidence": 0.94,
+          "reasoning": "Foreign key to dept_info.dept_id translates to a MongoDB ObjectId reference to the corresponding departments._id after department migration.",
+          "notes": "Requires an ID mapping table built during departments migration; dereference dept_id to the new departments._id before writing."
+        },
+        {
+          "source_field": "mgr_emp_id",
+          "destination_field": "employment.managerId",
+          "type_transform": "INT FK -> ObjectId (self-reference)",
+          "confidence": 0.94,
+          "reasoning": "Self-referential foreign key to another emp_master.emp_id maps to a self-reference by employees._id.",
+          "notes": "Requires an ID mapping table for employees; a two-pass migration may be needed to resolve self-references."
+        },
+        {
+          "source_field": "job_lvl_cd",
+          "destination_field": "employment.jobLevel",
+          "type_transform": "VARCHAR(10) -> String",
+          "confidence": 0.96,
+          "reasoning": "Job level code has matching semantics on both sides; example values in both schemas align.",
+          "notes": null
+        },
+        {
+          "source_field": "base_sal",
+          "destination_field": "compensation.baseSalary",
+          "type_transform": "DECIMAL(12,2) -> Number",
+          "confidence": 0.95,
+          "reasoning": "Base salary amount; MongoDB Number will represent as double-precision float.",
+          "notes": "Consider Decimal128 in MongoDB if exact decimal precision is required for compensation; document the choice explicitly."
+        },
+        {
+          "source_field": "sal_currency",
+          "destination_field": "compensation.currency",
+          "type_transform": "CHAR(3) -> String",
+          "confidence": 0.98,
+          "reasoning": "ISO 4217 currency code on both sides.",
+          "notes": null
+        },
+        {
+          "source_field": "work_email",
+          "destination_field": "contact.email",
+          "type_transform": "VARCHAR(120) -> String",
+          "confidence": 0.97,
+          "reasoning": "Work email maps to contact email; only one email field exists in the destination.",
+          "notes": null
+        },
+        {
+          "source_field": "work_phone",
+          "destination_field": "contact.phone",
+          "type_transform": "VARCHAR(20) -> String",
+          "confidence": 0.97,
+          "reasoning": "Work phone maps to contact phone; only one phone field exists in the destination.",
+          "notes": null
+        },
+        {
+          "source_field": "office_loc_id",
+          "destination_field": "location.locationId",
+          "type_transform": "INT FK -> ObjectId (foreign reference)",
+          "confidence": 0.94,
+          "reasoning": "Foreign key to locations.loc_id translates to a MongoDB ObjectId reference to the corresponding locations._id after location migration.",
+          "notes": "Requires an ID mapping table built during locations migration; dereference before writing."
+        },
+        {
+          "source_field": "is_remote",
+          "destination_field": "employment.isRemote",
+          "type_transform": "TINYINT(1) -> Boolean",
+          "confidence": 0.99,
+          "reasoning": "MySQL boolean-as-tinyint pattern maps to MongoDB native Boolean; 0 -> false, 1 -> true.",
+          "notes": null
+        },
+        {
+          "source_field": "rec_stat",
+          "destination_field": "employment.status",
+          "type_transform": "CHAR(1) code -> String enum",
+          "confidence": 0.96,
+          "reasoning": "Single-character status codes require a lookup transform to the enumerated string values used in the destination.",
+          "notes": "Transform: A -> 'active', I -> 'inactive', T -> 'terminated'. Reject unknown values at migration time rather than silently defaulting."
+        },
+        {
+          "source_field": "created_ts",
+          "destination_field": "meta.createdAt",
+          "type_transform": "DATETIME -> ISODate",
+          "confidence": 0.98,
+          "reasoning": "Record creation timestamp maps to the standard MongoDB meta.createdAt convention.",
+          "notes": null
+        },
+        {
+          "source_field": "updated_ts",
+          "destination_field": "meta.updatedAt",
+          "type_transform": "DATETIME -> ISODate",
+          "confidence": 0.98,
+          "reasoning": "Record last-update timestamp maps to the standard MongoDB meta.updatedAt convention.",
+          "notes": null
+        }
+      ],
+      "unmapped_source_fields": ["dob"],
+      "unmapped_destination_fields": [
+        "department.code",
+        "department.name",
+        "location.code",
+        "location.name",
+        "location.city",
+        "location.country",
+        "location.timezone"
+      ]
+    },
+    {
+      "source_table": "dept_info",
+      "destination_collection": "departments",
+      "confidence": 0.98,
+      "reasoning": "Both represent the department entity with identical structural role.",
+      "field_mappings": [
+        {
+          "source_field": "dept_id",
+          "destination_field": "_id",
+          "type_transform": "INT PRIMARY KEY -> ObjectId",
+          "confidence": 0.90,
+          "reasoning": "Primary key identifier maps to MongoDB document _id; ID generation strategy required at migration time.",
+          "notes": "Store original dept_id as a legacy field for traceability."
+        },
+        {
+          "source_field": "dept_cd",
+          "destination_field": "code",
+          "type_transform": "VARCHAR(20) -> String",
+          "confidence": 0.99,
+          "reasoning": "Human-readable department code matches on both sides.",
+          "notes": null
+        },
+        {
+          "source_field": "dept_nm",
+          "destination_field": "name",
+          "type_transform": "VARCHAR(100) -> String",
+          "confidence": 0.99,
+          "reasoning": "Department name maps directly.",
+          "notes": null
+        },
+        {
+          "source_field": "parent_dept_id",
+          "destination_field": "parentDepartmentId",
+          "type_transform": "INT FK -> ObjectId (self-reference)",
+          "confidence": 0.94,
+          "reasoning": "Self-referential foreign key to another dept_info.dept_id maps to a self-referential ObjectId reference.",
+          "notes": "Requires an ID mapping table for departments; a two-pass migration may be needed to resolve self-references."
+        },
+        {
+          "source_field": "dept_head_id",
+          "destination_field": "headEmployeeId",
+          "type_transform": "INT FK -> ObjectId (foreign reference)",
+          "confidence": 0.94,
+          "reasoning": "Foreign key to emp_master.emp_id maps to an ObjectId reference to employees._id.",
+          "notes": "Requires an ID mapping table for employees; dereference before writing."
+        },
+        {
+          "source_field": "cost_ctr_cd",
+          "destination_field": "costCenterCode",
+          "type_transform": "VARCHAR(20) -> String",
+          "confidence": 0.99,
+          "reasoning": "Finance cost center code has identical semantics.",
+          "notes": null
+        },
+        {
+          "source_field": "dept_stat",
+          "destination_field": "isActive",
+          "type_transform": "CHAR(1) code -> Boolean",
+          "confidence": 0.95,
+          "reasoning": "Two-value status code (A/I) collapses to a Boolean isActive flag on the destination.",
+          "notes": "Transform: A -> true, I -> false. Reject unknown values at migration time rather than silently defaulting."
+        }
+      ],
+      "unmapped_source_fields": [],
+      "unmapped_destination_fields": []
+    },
+    {
+      "source_table": "locations",
+      "destination_collection": "locations",
+      "confidence": 0.99,
+      "reasoning": "Both represent the location entity with identical structural role.",
+      "field_mappings": [
+        {
+          "source_field": "loc_id",
+          "destination_field": "_id",
+          "type_transform": "INT PRIMARY KEY -> ObjectId",
+          "confidence": 0.90,
+          "reasoning": "Primary key identifier maps to MongoDB document _id.",
+          "notes": "Store original loc_id as a legacy field for traceability."
+        },
+        {
+          "source_field": "loc_cd",
+          "destination_field": "code",
+          "type_transform": "VARCHAR(20) -> String",
+          "confidence": 0.99,
+          "reasoning": "Human-readable location code matches on both sides.",
+          "notes": null
+        },
+        {
+          "source_field": "loc_nm",
+          "destination_field": "name",
+          "type_transform": "VARCHAR(100) -> String",
+          "confidence": 0.99,
+          "reasoning": "Location name maps directly.",
+          "notes": null
+        },
+        {
+          "source_field": "city",
+          "destination_field": "city",
+          "type_transform": "VARCHAR(80) -> String",
+          "confidence": 0.99,
+          "reasoning": "Direct semantic match.",
+          "notes": null
+        },
+        {
+          "source_field": "state_prov",
+          "destination_field": "stateOrProvince",
+          "type_transform": "VARCHAR(80) -> String",
+          "confidence": 0.98,
+          "reasoning": "State or province name maps directly; only the naming convention differs.",
+          "notes": null
+        },
+        {
+          "source_field": "country_cd",
+          "destination_field": "country",
+          "type_transform": "CHAR(2) -> String",
+          "confidence": 0.98,
+          "reasoning": "ISO 3166-1 alpha-2 country code on both sides.",
+          "notes": null
+        },
+        {
+          "source_field": "postal_cd",
+          "destination_field": "postalCode",
+          "type_transform": "VARCHAR(20) -> String",
+          "confidence": 0.99,
+          "reasoning": "Postal code semantics match directly.",
+          "notes": null
+        },
+        {
+          "source_field": "tz_cd",
+          "destination_field": "timezone",
+          "type_transform": "VARCHAR(50) -> String",
+          "confidence": 0.99,
+          "reasoning": "IANA timezone identifier on both sides.",
+          "notes": null
+        }
+      ],
+      "unmapped_source_fields": [],
+      "unmapped_destination_fields": []
+    }
+  ]
+}
