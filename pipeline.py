@@ -19,7 +19,9 @@ Architecture (four stages):
   [3] Field mapping (LLM, one call per matched table pair)
       For each pair, send only that pair's fields. Schema-constrained JSON.
 
-  [4] Verification and assembly (deterministic)
+  [4] Enrichment and verification (deterministic)
+      Apply deterministic rules the LLM tends to miss (for example, MongoDB
+      unique-index reminders for source fields with UNIQUE constraints).
       Cross-check completeness, validity, duplicate detection. Assemble output.
 
 Design principles:
@@ -362,6 +364,27 @@ Common type transformations:
 - DECIMAL -> Number (consider Decimal128 if exact precision matters)
 - CHAR(3) / CHAR(2) / VARCHAR -> String (usually direct)
 
+Confidence calibration (this matters):
+- Reserve 1.0 for mappings you would stake your reputation on. In practice,
+  mappings that require a type transform, a value transform, an FK
+  translation, or an ID generation strategy should NOT be 1.0. Something
+  can still go wrong operationally even when the mapping is obviously right.
+- Use 0.95 to 0.99 for high-confidence mappings with mechanical transforms
+  (INT PK -> ObjectId, TINYINT(1) -> Boolean, VARCHAR -> String, ISO code
+  fields with matching standards on both sides).
+- Use 0.85 to 0.94 for mappings that involve semantic judgment (a source
+  field matched to one of several plausible destinations, enum-code to
+  String enum with a value transform, or a name-based match where the
+  underlying semantics are inferred rather than declared).
+- Use below 0.85 when there is genuine uncertainty (ambiguous label
+  matches, multiple plausible destinations, or missing metadata).
+- Do NOT default to 1.0 across every field. Downstream systems use
+  confidence to route mappings to human review; a uniform 1.0 makes that
+  routing impossible and defeats the point of surfacing confidence at all.
+- If you catch yourself about to write 1.0 more than three times in a
+  single table pair, stop and re-rank: some of those are almost certainly
+  in the 0.95 to 0.99 band, not at the ceiling.
+
 Return only a JSON object in this exact form:
 {
   "confidence": 0.0,
@@ -413,8 +436,80 @@ def map_fields(
 
 
 # =============================================================================
-# Stage 4: Verification (deterministic)
+# Stage 4: Enrichment and Verification (deterministic)
 # =============================================================================
+#
+# Enrichment applies deterministic rules the LLM often misses. Verification
+# then checks structural correctness. Both run per table pair; both are cheap
+# and reproducible.
+
+
+def enrich_mapping(
+    source_table: SourceTable,
+    mapping: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply deterministic rules to a proposed field mapping in place.
+
+    Rationale
+    ---------
+    LLM mapping proposals are semantically strong but operationally patchy.
+    A production pipeline should not depend on the LLM catching every
+    infrastructure detail. Rules that can be applied by inspecting the
+    parsed source schema go here instead, where they are cheap, reliable,
+    testable, and consistent across runs.
+
+    Rules currently applied
+    -----------------------
+    - UNIQUE constraint preservation:
+      MongoDB does NOT automatically preserve MySQL uniqueness. If a source
+      field carries the UNIQUE constraint AND maps to a non-null, non-_id
+      destination path, append a note reminding the migration engineer to
+      create a corresponding unique index in MongoDB on that path. The
+      _id case is excluded because MongoDB _id is inherently unique.
+
+    Rules to add as they emerge from real migrations:
+    - NOT NULL preservation (add MongoDB schema validation rule)
+    - CHECK constraints (translate to MongoDB $jsonSchema validators)
+    - DEFAULT values (surface as migration-time default population)
+    - CHAR-length limits (surface as MongoDB validation)
+
+    Deterministic rules are cheaper, more reliable, and more testable than
+    prompting the LLM to catch them. Add rules here rather than expanding
+    the prompt.
+
+    Returns the mapping dict, mutated in place for convenience.
+    """
+    src_by_name = {f.name: f for f in source_table.fields}
+
+    for m in mapping.get("field_mappings", []):
+        src_name = m.get("source_field")
+        src = src_by_name.get(src_name)
+        if src is None:
+            # verify_mapping will flag this as an unknown source field
+            continue
+
+        dest = m.get("destination_field")
+
+        # ---- UNIQUE constraint rule ----
+        has_unique = any("UNIQUE" in c.upper() for c in src.constraints)
+        if has_unique and dest and dest != "_id":
+            unique_note = (
+                f"Source field carries a UNIQUE constraint in MySQL. "
+                f"Create a corresponding unique index in MongoDB on "
+                f"'{dest}' to preserve the uniqueness invariant, since "
+                f"MongoDB does not carry the constraint over automatically."
+            )
+            existing = m.get("notes")
+            if existing:
+                # If the LLM already mentioned unique-index guidance, do
+                # not duplicate. Otherwise, append.
+                if "unique index" not in existing.lower():
+                    m["notes"] = f"{existing.rstrip('.')} . {unique_note}"
+            else:
+                m["notes"] = unique_note
+
+    return mapping
+
 
 def verify_mapping(
     source_table: SourceTable,
@@ -507,7 +602,12 @@ def run_pipeline(output_path: Path) -> MappingOutput:
         dest = dest_by_name[dc]
         mapping = map_fields(client, src, dest)
 
-        log.info("stage 4: verifying mapping for %s -> %s (deterministic)", st, dc)
+        log.info("stage 4a: enriching mapping for %s -> %s (deterministic rules)",
+                 st, dc)
+        mapping = enrich_mapping(src, mapping)
+
+        log.info("stage 4b: verifying mapping for %s -> %s (deterministic checks)",
+                 st, dc)
         warnings = verify_mapping(src, dest, mapping)
         for w in warnings:
             log.warning("  %s -> %s: %s", st, dc, w)
@@ -558,8 +658,8 @@ if __name__ == "__main__":
         description="Schema field mapper pipeline. "
                     "Maps MySQL fields to MongoDB paths via a two-stage LLM pipeline."
     )
-    ap.add_argument("--out", default="mapping2.json",
-                    help="Output JSON path (default: mapping2.json)")
+    ap.add_argument("--out", default="mapping.json",
+                    help="Output JSON path (default: mapping.json)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
