@@ -1,0 +1,19 @@
+uv run pipeline.py
+INFO stage 1: parsing schemas (deterministic)
+INFO   parsed 3 source tables, 3 destination collections
+INFO stage 2: matching tables to collections (LLM, one call)
+INFO HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO   proposed 3 table pairs
+INFO stage 3: mapping fields for emp_master -> employees (LLM, one call)
+INFO HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO stage 4a: enriching mapping for emp_master -> employees (deterministic rules)
+INFO stage 4b: verifying mapping for emp_master -> employees (deterministic checks)
+INFO stage 3: mapping fields for dept_info -> departments (LLM, one call)
+INFO HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO stage 4a: enriching mapping for dept_info -> departments (deterministic rules)
+INFO stage 4b: verifying mapping for dept_info -> departments (deterministic checks)
+INFO stage 3: mapping fields for locations -> locations (LLM, one call)
+INFO HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+INFO stage 4a: enriching mapping for locations -> locations (deterministic rules)
+INFO stage 4b: verifying mapping for locations -> locations (deterministic checks)
+INFO done. wrote mapping to mapping.json
